@@ -1,0 +1,15 @@
+# node
+node_modules
+dist
+.env
+
+# python
+__pycache__/
+*.pyc
+.env
+
+# database
+*.db
+
+# misc
+.vscode
