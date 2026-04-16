@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion"
 
-export default function BookCard({ book, onOpen, onDelete }) {
+export default function BookCard({ book, onOpen, onDelete, owner }) {
   if (!book) return null
 
   const statusColor = {
@@ -14,6 +14,18 @@ export default function BookCard({ book, onOpen, onDelete }) {
       className="bg-white rounded-2xl shadow p-4 cursor-pointer hover:shadow-md transition relative"
       onClick={onOpen}
     >
+      {owner && (
+        <a
+          href={`/profile/${owner.id}`}
+          onClick={(e) => {
+            e.stopPropagation()
+          }}
+          className="text-xs text-gray-500 absolute left-3 top-3 hover:underline"
+        >
+          {owner.name || owner.email}
+        </a>
+      )}
+
       {/* IMAGE */}
       <div className="h-56 flex items-start justify-center">
         <div className="bg-white p-3 rounded-lg shadow-md transform rotate-1 w-[90%] max-w-xs">
@@ -53,16 +65,18 @@ export default function BookCard({ book, onOpen, onDelete }) {
       </div>
 
       {/* DELETE BUTTON */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          onDelete && onDelete(book.id)
-        }}
-        className="absolute top-3 right-3 text-red-500 text-sm"
-        aria-label="Delete book"
-      >
-        🗑️
-      </button>
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete && onDelete(book.id)
+          }}
+          className="absolute top-3 right-3 text-red-500 text-sm"
+          aria-label="Delete book"
+        >
+          🗑️
+        </button>
+      )}
     </div>
   )
 }
