@@ -6,9 +6,20 @@ class BookCreate(BaseModel):
     review: str
     rating: int
     status: str
+    genre: str | None = None
     image: str | None = None
     availability: bool | None = True
     owner_id: int | None = None
+
+class BookUpdate(BaseModel):
+    title: str | None = None
+    author: str | None = None
+    review: str | None = None
+    rating: int | None = None
+    status: str | None = None
+    genre: str | None = None
+    image: str | None = None
+    availability: bool | None = None
 
 class UserCreate(BaseModel):
     email: str

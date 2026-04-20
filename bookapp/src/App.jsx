@@ -1,26 +1,45 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
-import Index from "./pages/Index"
-import Login from "./pages/Login"
-import Register from "./pages/Register"
-import Profile from "./pages/Profile"
-import Users from "./pages/Users"
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { AuthProvider } from "./context/AuthContext.jsx"
+import Landing from "./pages/Landing.jsx"
+import GuestFeed from "./pages/GuestFeed.jsx"
+import Feed from "./pages/Feed.jsx"
+import ForYou from "./pages/ForYou.jsx"
+import Login from "./pages/Login.jsx"
+import Register from "./pages/Register.jsx"
+import Profile from "./pages/Profile.jsx"
+import Users from "./pages/Users.jsx"
+import { RequireAuth } from "./components/RequireAuth.jsx"
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
 
-        {/* main app */}
-        <Route path="/" element={<Index />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/profile/:id" element={<Profile />} />
+          {/* Landing - redirects to feed */}
+          <Route path="/" element={<Landing />} />
 
-        {/* auth pages */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+          {/* Guest accessible feed (with restrictions) */}
+          <Route path="/browse" element={<GuestFeed />} />
 
-      </Routes>
-    </BrowserRouter>
+          {/* Protected authenticated feeds */}
+          <Route path="/feed" element={<RequireAuth><Feed /></RequireAuth>} />
+          <Route path="/for-you" element={<RequireAuth><ForYou /></RequireAuth>} />
+
+          {/* other pages */}
+          <Route path="/users" element={<Users />} />
+          <Route path="/profile/:id" element={<Profile />} />
+
+          {/* auth pages */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+
+          {/* fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
 

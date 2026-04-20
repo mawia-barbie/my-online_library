@@ -10,6 +10,7 @@ class Book(Base):
     review = Column(String)
     rating = Column(Integer)
     status = Column(String)
+    genre = Column(String, nullable=True)
     image = Column(String)  # store image URL/base64 for 
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     availability = Column(Boolean, default=True)

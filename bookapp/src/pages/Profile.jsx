@@ -1,17 +1,22 @@
 import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import BookCard from "../components/BookCard"
+import { useAuth } from "../context/AuthContext"
+import { RequireAuth } from "../components/RequireAuth"
+import { BookCard } from "../components/BookCard"
+import BookDetailDialog from "../components/BookDetailDialog"
 
 // Profile page with left sidebar (polaroid style) and books list.
 // - Displays avatar, display name (nickname), bio, and rating.
 // - If the logged-in user is viewing their own profile, they can edit name/bio/avatar.
-export default function Profile() {
+// - Requires authentication to access any profile
+function ProfileInner() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [profile, setProfile] = useState(null)
   const [books, setBooks] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [selectedBook, setSelectedBook] = useState(null)
 
   // editable fields
   const [name, setName] = useState("")
@@ -31,14 +36,15 @@ export default function Profile() {
       })
       .catch((err) => console.error(err))
 
-    // load books for this user
-    fetch(`http://127.0.0.1:8000/users/${id}/books`)
+    // load books for this user (now requires authentication)
+    const token = localStorage.getItem("token")
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
+    fetch(`http://127.0.0.1:8000/users/${id}/books`, { headers })
       .then((res) => res.json())
-      .then((data) => setBooks(data))
+      .then((data) => setBooks(Array.isArray(data) ? data : []))
       .catch((err) => console.error(err))
 
     // get current logged in user id if token available
-    const token = localStorage.getItem("token")
     if (token) {
       fetch("http://127.0.0.1:8000/users/me", {
         headers: { Authorization: `Bearer ${token}` },
@@ -97,11 +103,27 @@ export default function Profile() {
       })
       if (res.ok) {
         setBooks((prev) => prev.filter((b) => b.id !== id))
+        setSelectedBook(null)
       } else {
         console.error('Failed to delete', await res.text())
       }
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const updateBook = (updatedBook) => {
+    // Update the book in the list
+    setBooks((prev) =>
+      prev.map((b) =>
+        b.id === updatedBook.id
+          ? { ...b, ...updatedBook }
+          : b
+      )
+    )
+    // Update selected book display
+    if (selectedBook && selectedBook.id === updatedBook.id) {
+      setSelectedBook({ ...selectedBook, ...updatedBook })
     }
   }
 
@@ -112,7 +134,7 @@ export default function Profile() {
       <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
 
         {/* LEFT SIDEBAR PROFILE */}
-        <aside className="md:col-span-1 bg-white rounded-2xl p-6 shadow">
+        <aside className="md:col-span-1 bg-white rounded-2xl p-6 shadow sticky top-6 h-fit">
 
           {/* avatar */}
           <div className="flex flex-col items-center">
@@ -182,16 +204,29 @@ export default function Profile() {
               <BookCard
                 key={b.id}
                 book={b}
-                onOpen={() => {}}
-                // only allow delete when viewing your own profile
-                onDelete={canEdit ? deleteBook : undefined}
+                onOpen={() => setSelectedBook(b)}
                 owner={b.owner ? b.owner : { id: profile.id, name: profile.name || profile.email, avatar: profile.avatar }}
               />
             ))}
           </div>
         </main>
 
+        <BookDetailDialog
+          book={selectedBook}
+          open={!!selectedBook}
+          onClose={() => setSelectedBook(null)}
+          onDelete={canEdit ? deleteBook : undefined}
+          onUpdate={updateBook}
+          currentUser={currentUserId ? { id: currentUserId } : null}
+        />
+
       </div>
     </div>
   )
+}
+
+export default function Profile() {
+  // Profile pages are now publicly readable - no login required
+  // Users can only edit their own profile when authenticated
+  return <ProfileInner />
 }
