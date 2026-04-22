@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext"
 import { RequireAuth } from "../components/RequireAuth"
 import { BookCard } from "../components/BookCard"
 import BookDetailDialog from "../components/BookDetailDialog"
+import { CITY_OPTIONS, getAreasForCity } from "../utils/locations"
+import { GENRE_OPTIONS } from "../utils/genres"
 
 // Profile page with left sidebar (polaroid style) and books list.
 // - Displays avatar, display name (nickname), bio, and rating.
@@ -12,6 +14,7 @@ import BookDetailDialog from "../components/BookDetailDialog"
 function ProfileInner() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { updateProfile } = useAuth()
   const [profile, setProfile] = useState(null)
   const [books, setBooks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -21,6 +24,9 @@ function ProfileInner() {
   // editable fields
   const [name, setName] = useState("")
   const [bio, setBio] = useState("")
+  const [city, setCity] = useState("")
+  const [area, setArea] = useState("")
+  const [interests, setInterests] = useState([])
   const [avatar, setAvatar] = useState(null) // base64
   const [currentUserId, setCurrentUserId] = useState(null)
 
@@ -32,6 +38,9 @@ function ProfileInner() {
         setProfile(data)
         setName(data.name || "")
         setBio(data.bio || "")
+        setCity(data.city || "")
+        setArea(data.area || "")
+        setInterests(Array.isArray(data.interests) ? data.interests : [])
         setAvatar(data.avatar || null)
       })
       .catch((err) => console.error(err))
@@ -74,23 +83,21 @@ function ProfileInner() {
     const token = localStorage.getItem("token")
     if (!token) return navigate('/login')
 
-    const body = { name, bio, avatar }
-    const res = await fetch("http://127.0.0.1:8000/users/me", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    })
-
-    if (res.ok) {
-      // refresh profile
-      const updated = await fetch(`http://127.0.0.1:8000/users/${id}`).then(r=>r.json())
+    try {
+      await updateProfile({
+        name,
+        bio,
+        avatar,
+        interests,
+        city,
+        area,
+      })
+      const updated = await fetch(`http://127.0.0.1:8000/users/${id}`).then((r) => r.json())
       setProfile(updated)
       setEditing(false)
-      return
+    } catch (err) {
+      alert("Update failed")
     }
-
-    const data = await res.json().catch(()=>({}))
-    alert(data.detail || data.message || 'Update failed')
   }
 
   const deleteBook = async (id) => {
@@ -127,6 +134,12 @@ function ProfileInner() {
     }
   }
 
+  const toggleInterest = (genre) => {
+    setInterests((prev) =>
+      prev.includes(genre) ? prev.filter((item) => item !== genre) : [...prev, genre]
+    )
+  }
+
   if (loading) return null
 
   return (
@@ -156,6 +169,13 @@ function ProfileInner() {
 
             <h2 className="mt-4 text-xl font-bold text-gray-800">{profile?.name || 'No display name'}</h2>
             <p className="text-sm text-gray-500 mt-1">{profile?.bio || 'No bio yet'}</p>
+
+            {/* Location Display */}
+            {profile?.city && (
+              <p className="text-sm text-indigo-600 mt-2">
+                📍 {profile.area || 'Area'}, {profile.city}
+              </p>
+            )}
 
             {/* RATING */}
             <div className="mt-6 bg-gray-50 rounded-xl w-full p-4 flex items-center justify-between">
@@ -191,6 +211,64 @@ function ProfileInner() {
               />
 
               <textarea value={bio} onChange={(e)=>setBio(e.target.value)} placeholder="Short bio" className="w-full border p-2 rounded mb-3" />
+
+              <div className="mb-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Book Interests</p>
+                <div className="flex flex-wrap gap-2">
+                  {GENRE_OPTIONS.map((genre) => {
+                    const active = interests.includes(genre)
+                    return (
+                      <button
+                        key={genre}
+                        type="button"
+                        onClick={() => toggleInterest(genre)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                          active
+                            ? "bg-rose-100 text-rose-700 border-rose-300"
+                            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        {genre}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Location Fields */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <select
+                  value={city}
+                  onChange={(e) => {
+                    setCity(e.target.value)
+                    setArea("")
+                  }}
+                  className="border p-2 rounded bg-white"
+                >
+                  <option value="">Select county</option>
+                  {CITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={area}
+                  onChange={(e) => setArea(e.target.value)}
+                  className="border p-2 rounded bg-white"
+                  disabled={!city}
+                >
+                  <option value="">Select area</option>
+                  {getAreasForCity(city).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Choose the county and area where you normally want to meet for book pickup. Exact location is never shared.
+              </p>
 
               <div className="flex gap-3">
                 <button onClick={handleSave} className="bg-black text-white px-4 py-2 rounded">Save</button>

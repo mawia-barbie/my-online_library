@@ -7,6 +7,8 @@ import { BookCard } from "../components/BookCard"
 import BookDetailDialog from "../components/BookDetailDialog"
 import { Plus, Compass, X } from "lucide-react"
 import StarRating from "../components/StarRating"
+import { CITY_OPTIONS, getAreasForCity } from "../utils/locations"
+import { GENRE_OPTIONS } from "../utils/genres"
 
 function FeedInner() {
   const { user } = useAuth()
@@ -17,6 +19,8 @@ function FeedInner() {
   const [searchQuery, setSearchQuery] = useState("")
   const [suggestions, setSuggestions] = useState([])
   const [sLoading, setSLoading] = useState(false)
+  const [showNearbyOnly, setShowNearbyOnly] = useState(false)
+  const [areaFilter, setAreaFilter] = useState("all")
   const searchRef = useRef(null)
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
@@ -29,8 +33,21 @@ function FeedInner() {
     review: "",
     status: "",
     genre: "",
+    genre_tags: [],
     image: "",
+    pickup_hint: "",
+    city: "",
+    area: "",
   })
+
+  useEffect(() => {
+    if (!user) return
+    setFormData((prev) => ({
+      ...prev,
+      city: prev.city || user.city || "",
+      area: prev.area || user.area || "",
+    }))
+  }, [user])
 
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0]
@@ -130,14 +147,39 @@ function FeedInner() {
         name: user.name || user.email,
         avatar: user.avatar,
       }
-      setBooks((prev) => [{ ...data, owner: ownerData }, ...prev])
+      setBooks((prev) => [{ ...data, owner: data.owner || ownerData }, ...prev])
       // Reset form
-      setFormData({ title: "", author: "", rating: 0, review: "", status: "", genre: "", image: "" })
+      setFormData({
+        title: "",
+        author: "",
+        rating: 0,
+        review: "",
+        status: "",
+        genre: "",
+        genre_tags: [],
+        image: "",
+        pickup_hint: "",
+        city: user?.city || "",
+        area: user?.area || "",
+      })
       setOpen(false)
     } catch (err) {
       console.error("Error adding book:", err)
       alert("Error adding book. Check console for details.")
     }
+  }
+
+  const toggleGenreTag = (genre) => {
+    setFormData((prev) => {
+      const nextTags = prev.genre_tags.includes(genre)
+        ? prev.genre_tags.filter((item) => item !== genre)
+        : [...prev.genre_tags, genre]
+      return {
+        ...prev,
+        genre_tags: nextTags,
+        genre: nextTags[0] || "",
+      }
+    })
   }
 
   const deleteBook = async (id) => {
@@ -170,6 +212,22 @@ function FeedInner() {
     }
   }
 
+  const filteredBooks = books
+    .filter((book) => {
+      if (!showNearbyOnly) return true
+      if (!user?.city || book.city !== user.city) return false
+      if (areaFilter === "my-area") {
+        return Boolean(user?.area) && book.area === user.area
+      }
+      return true
+    })
+    .sort((a, b) => {
+      if (!showNearbyOnly || !user?.area) return 0
+      const aRank = a.area === user.area ? 0 : 1
+      const bRank = b.area === user.area ? 0 : 1
+      return aRank - bRank
+    })
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -182,6 +240,43 @@ function FeedInner() {
               <h1 className="text-3xl font-bold text-gray-900">Explore</h1>
             </div>
             <p className="text-gray-600">Discover books from everyone in the community</p>
+            {user?.city && (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => {
+                    const next = !showNearbyOnly
+                    setShowNearbyOnly(next)
+                    if (!next) setAreaFilter("all")
+                  }}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition ${
+                    showNearbyOnly
+                      ? "bg-green-600 text-white"
+                      : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  Nearby Books
+                </button>
+
+                {showNearbyOnly && (
+                  <select
+                    value={areaFilter}
+                    onChange={(e) => setAreaFilter(e.target.value)}
+                    className="px-3 py-2 rounded-full text-sm border border-gray-300 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                  >
+                    <option value="all">All Areas</option>
+                    <option value="my-area" disabled={!user?.area}>My Area Only</option>
+                  </select>
+                )}
+
+                {showNearbyOnly && (
+                  <p className="text-sm text-gray-500">
+                    {areaFilter === "my-area"
+                      ? `Showing books in ${user.area || "your area"}, ${user.city}`
+                      : `Showing books across ${user.city}, with your area ranked highest`}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -245,19 +340,26 @@ function FeedInner() {
           <div className="flex justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border border-indigo-600 border-t-transparent"></div>
           </div>
-        ) : books.length === 0 ? (
+        ) : filteredBooks.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-600">No books available yet. Be the first to add one!</p>
+            <p className="text-gray-600">
+              {showNearbyOnly
+                ? areaFilter === "my-area"
+                  ? "No books in your area yet."
+                  : `No books found in ${user?.city || "your city"} yet.`
+                : "No books available yet. Be the first to add one!"}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {books.map((book) => (
+            {filteredBooks.map((book) => (
               <BookCard
                 key={book.id}
                 book={book}
                 onOpen={() => setSelectedBook(book)}
                 onDelete={user && book.owner && String(user.id) === String(book.owner.id) ? deleteBook : undefined}
                 owner={book.owner}
+                currentUser={user}
               />
             ))}
           </div>
@@ -283,6 +385,10 @@ function FeedInner() {
                 e.preventDefault()
                 if (!formData.title || !formData.author) {
                   alert("Title and author are required")
+                  return
+                }
+                if (!formData.city || !formData.area) {
+                  alert("City and pickup area are required")
                   return
                 }
                 addBook(formData)
@@ -364,14 +470,32 @@ function FeedInner() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Genre (Optional)</label>
-                <input
-                  type="text"
-                  value={formData.genre || ""}
-                  onChange={(e) => setFormData({...formData, genre: e.target.value})}
-                  placeholder="e.g., Fiction, Romance, Thriller, Mystery"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                />
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Genres</label>
+                  <span className="text-xs text-gray-500">Choose one or more</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {GENRE_OPTIONS.map((genre) => {
+                    const active = formData.genre_tags.includes(genre)
+                    return (
+                      <button
+                        key={genre}
+                        type="button"
+                        onClick={() => toggleGenreTag(genre)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                          active
+                            ? "bg-indigo-100 text-indigo-700 border-indigo-300"
+                            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        {genre}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  These tags help place your book in the right personalized feeds without blocking discovery in Explore.
+                </p>
               </div>
 
               <div>
@@ -391,6 +515,69 @@ function FeedInner() {
                   rows="3"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600"
                 />
+              </div>
+
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-900">Choose Pickup Area</p>
+                <p className="mt-1 text-xs text-emerald-800">
+                  Choose the area where you would like to meet for book pickup. Exact location is never shared.
+                </p>
+
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <p className="text-sm font-semibold text-emerald-900">Choose Pickup Area</p>
+                    <p className="mt-1 text-xs text-emerald-800">
+                      Select a county first, then choose one of its valid areas. Exact location is never shared.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">County *</label>
+                    <select
+                      value={formData.city || ""}
+                      onChange={(e) => setFormData({ ...formData, city: e.target.value, area: "" })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white"
+                    >
+                      <option value="">Select county</option>
+                      {CITY_OPTIONS.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Area *</label>
+                    <select
+                      value={formData.area || ""}
+                      onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600 bg-white"
+                      disabled={!formData.city}
+                    >
+                      <option value="">Select pickup area</option>
+                      {getAreasForCity(formData.city).map((area) => (
+                        <option key={area} value={area}>
+                          {area}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Pickup Hint (Optional)</label>
+                <input
+                  type="text"
+                  value={formData.pickup_hint || ""}
+                  onChange={(e) => setFormData({ ...formData, pickup_hint: e.target.value })}
+                  placeholder="e.g. Near Sarit Centre"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Examples: "Near Sarit Centre", "Near Yaya Centre", "Along Ngong Road".
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4">

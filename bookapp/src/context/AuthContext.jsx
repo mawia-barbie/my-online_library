@@ -24,7 +24,8 @@ export function AuthProvider({ children }) {
       .then((data) => {
         logAuthFlow("✅ User authenticated on mount", { user: data.id })
         logUserState(data, token)
-        setUser(data)
+        // Normalize id to number to avoid type mismatch
+        setUser({ ...data, id: data.id != null ? Number(data.id) : data.id })
       })
       .catch((err) => {
         logAuthFlow("❌ Token validation failed", { error: err.message })
@@ -44,7 +45,7 @@ export function AuthProvider({ children }) {
       const data = await res.json()
       logAuthFlow("✅ Login successful", { user: data.id })
       logUserState(data, token)
-      setUser(data)
+      setUser({ ...data, id: data.id != null ? Number(data.id) : data.id })
       return data
     } catch (err) {
       logAuthFlow("❌ Login failed", { error: err.message })
@@ -113,7 +114,7 @@ export function AuthProvider({ children }) {
     if (!res.ok) throw new Error("update failed")
     // refresh user
     const updated = await (await fetch("http://127.0.0.1:8000/users/me", { headers: { Authorization: `Bearer ${token}` } })).json()
-    setUser(updated)
+    setUser({ ...updated, id: updated.id != null ? Number(updated.id) : updated.id })
     return updated
   }
 

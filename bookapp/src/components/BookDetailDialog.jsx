@@ -1,9 +1,23 @@
 import { motion, AnimatePresence } from "framer-motion"
 import { useState, useEffect } from "react"
+import { CITY_OPTIONS, getAreasForCity } from "../utils/locations"
+import { GENRE_OPTIONS } from "../utils/genres"
 
 export default function BookDetailDialog({ book, open, onClose, onDelete, onUpdate, currentUser }) {
   const [editStatus, setEditStatus] = useState(book?.status || "")
+  const [editCity, setEditCity] = useState(book?.city || currentUser?.city || "")
+  const [editArea, setEditArea] = useState(book?.area || currentUser?.area || "")
+  const [editPickupHint, setEditPickupHint] = useState(book?.pickup_hint || "")
+  const [editGenreTags, setEditGenreTags] = useState(book?.genre_tags || (book?.genre ? [book.genre] : []))
   const [updating, setUpdating] = useState(false)
+
+  useEffect(() => {
+    setEditStatus(book?.status || "")
+    setEditCity(book?.city || currentUser?.city || "Nairobi")
+    setEditArea(book?.area || currentUser?.area || "")
+    setEditPickupHint(book?.pickup_hint || "")
+    setEditGenreTags(book?.genre_tags || (book?.genre ? [book.genre] : []))
+  }, [book, currentUser])
 
   // Debug: log ownership info when book changes
   useEffect(() => {
@@ -27,6 +41,19 @@ export default function BookDetailDialog({ book, open, onClose, onDelete, onUpda
   }
 
   const statusOptions = ["To Read", "Reading", "Done"]
+  const isOwner = Boolean(currentUser && (book.owner_id === currentUser.id || (book.owner && book.owner.id === currentUser.id)))
+  const hasChanges =
+    editStatus !== (book.status || "") ||
+    editCity !== (book.city || "") ||
+    editArea !== (book.area || "") ||
+    editPickupHint !== (book.pickup_hint || "") ||
+    JSON.stringify(editGenreTags) !== JSON.stringify(book.genre_tags || (book.genre ? [book.genre] : []))
+
+  const toggleGenreTag = (genre) => {
+    setEditGenreTags((prev) =>
+      prev.includes(genre) ? prev.filter((item) => item !== genre) : [...prev, genre]
+    )
+  }
 
   return (
     <AnimatePresence>
@@ -148,7 +175,111 @@ export default function BookDetailDialog({ book, open, onClose, onDelete, onUpda
                   <p className="text-sm text-gray-900 font-semibold">{book.rating}/5 ⭐</p>
                 </div>
               )}
+              {(book.city || book.area) && (
+                <div>
+                  <p className="text-xs text-gray-600 font-medium">Location</p>
+                  <p className="text-sm text-gray-900 font-semibold">📍 {book.area || "Area not set"}, {book.city || "City not set"}</p>
+                </div>
+              )}
+              {((book.genre_tags && book.genre_tags.length > 0) || book.genre) && (
+                <div className="col-span-2">
+                  <p className="text-xs text-gray-600 font-medium">Genres</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(book.genre_tags && book.genre_tags.length > 0 ? book.genre_tags : [book.genre]).map((genre) => (
+                      <span key={genre} className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-700">
+                        {genre}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {book.pickup_hint && (
+                <div>
+                  <p className="text-xs text-gray-600 font-medium">Pickup Hint</p>
+                  <p className="text-sm text-gray-900 font-semibold">{book.pickup_hint}</p>
+                </div>
+              )}
             </div>
+
+            {isOwner && (
+              <div className="mb-6 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+                <h3 className="text-sm font-semibold text-emerald-900 mb-3">Pickup Location</h3>
+                <p className="text-xs text-emerald-800 mb-4">
+                  Update the safe area where this book should appear in Nearby. Exact location is never shared.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-2">County</label>
+                    <select
+                      value={editCity}
+                      onChange={(e) => {
+                        setEditCity(e.target.value)
+                        setEditArea("")
+                      }}
+                      className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="">Select county</option>
+                      {CITY_OPTIONS.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-2">Area</label>
+                    <select
+                      value={editArea}
+                      onChange={(e) => setEditArea(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm"
+                      disabled={!editCity}
+                    >
+                      <option value="">Select pickup area</option>
+                      {getAreasForCity(editCity).map((area) => (
+                        <option key={area} value={area}>
+                          {area}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="block text-xs font-medium text-gray-700 mb-2">Genres</label>
+                  <div className="flex flex-wrap gap-2">
+                    {GENRE_OPTIONS.map((genre) => {
+                      const active = editGenreTags.includes(genre)
+                      return (
+                        <button
+                          key={genre}
+                          type="button"
+                          onClick={() => toggleGenreTag(genre)}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                            active
+                              ? "border-indigo-300 bg-indigo-100 text-indigo-700"
+                              : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                        >
+                          {genre}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-2">Pickup Hint</label>
+                  <input
+                    value={editPickupHint}
+                    onChange={(e) => setEditPickupHint(e.target.value)}
+                    placeholder="e.g. Near Sarit Centre"
+                    className="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* OWNER INFO */}
             {book.owner && (
@@ -193,9 +324,13 @@ export default function BookDetailDialog({ book, open, onClose, onDelete, onUpda
               <div className="flex gap-3">
 
                 {/* UPDATE STATUS (only if owner and status changed) */}
-                {onUpdate && currentUser && (book.owner_id === currentUser.id || (book.owner && book.owner.id === currentUser.id)) && editStatus !== book.status && (
+                {onUpdate && isOwner && hasChanges && (
                   <button
                     onClick={async () => {
+                      if (!editCity || !editArea) {
+                        alert("City and area are required for Nearby listing")
+                        return
+                      }
                       setUpdating(true)
                       try {
                         const token = localStorage.getItem('token')
@@ -205,18 +340,24 @@ export default function BookDetailDialog({ book, open, onClose, onDelete, onUpda
                             "Content-Type": "application/json",
                             "Authorization": `Bearer ${token}`,
                           },
-                          body: JSON.stringify({ status: editStatus }),
+                          body: JSON.stringify({
+                            status: editStatus,
+                            genre_tags: editGenreTags,
+                            city: editCity,
+                            area: editArea,
+                            pickup_hint: editPickupHint,
+                          }),
                         })
                         if (res.ok) {
                           const updated = await res.json()
                           onUpdate(updated)
                           onClose()
                         } else {
-                          alert("Failed to update book status")
+                          alert("Failed to update book")
                         }
                       } catch (err) {
                         console.error("Update failed:", err)
-                        alert("Error updating book status")
+                        alert("Error updating book")
                       } finally {
                         setUpdating(false)
                       }
@@ -224,7 +365,7 @@ export default function BookDetailDialog({ book, open, onClose, onDelete, onUpda
                     disabled={updating}
                     className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-medium transition disabled:opacity-50"
                   >
-                    {updating ? "Saving..." : "💾 Save Status"}
+                    {updating ? "Saving..." : "💾 Save Changes"}
                   </button>
                 )}
 

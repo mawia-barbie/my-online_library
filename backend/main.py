@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Query
 from fastapi import HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware  # 👈 ADD THIS
 from sqlalchemy.orm import Session, object_session
@@ -8,6 +8,8 @@ from sqlalchemy import text, or_, func
 from database import engine, Base, SessionLocal
 import models, schemas
 from auth import hash_password, verify_password, create_token
+from location_data import CITY_AREA_MAP, is_valid_city_area
+import json
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,6 +35,20 @@ def ensure_books_columns():
             conn.execute(text("ALTER TABLE books ADD COLUMN availability INTEGER DEFAULT 1"))
         if 'genre' not in cols:
             conn.execute(text("ALTER TABLE books ADD COLUMN genre TEXT"))
+        if 'genre_tags' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN genre_tags TEXT"))
+        if 'city' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN city TEXT"))
+        if 'area' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN area TEXT"))
+        if 'pickup_hint' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN pickup_hint TEXT"))
+        if 'location_display_name' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN location_display_name TEXT"))
+        if 'location_latitude' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN location_latitude REAL"))
+        if 'location_longitude' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN location_longitude REAL"))
 
 ensure_books_columns()
 
@@ -52,8 +68,38 @@ def ensure_users_columns():
             conn.execute(text("ALTER TABLE users ADD COLUMN bio TEXT"))
         if 'avatar' not in cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN avatar TEXT"))
+        if 'interests' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN interests TEXT"))
+        if 'city' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN city TEXT"))
+        if 'area' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN area TEXT"))
+        if 'location_display_name' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN location_display_name TEXT"))
+        if 'location_latitude' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN location_latitude REAL"))
+        if 'location_longitude' not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN location_longitude REAL"))
 
 ensure_users_columns()
+
+def ensure_chat_tables():
+    with engine.connect() as conn:
+        try:
+            res = conn.execute(text("PRAGMA table_info(chats)"))
+            cols = [row[1] for row in res.fetchall()]
+        except Exception:
+            # chats table doesn't exist yet
+            return
+        
+        try:
+            res = conn.execute(text("PRAGMA table_info(messages)"))
+            cols = [row[1] for row in res.fetchall()]
+        except Exception:
+            # messages table doesn't exist yet
+            return
+
+ensure_chat_tables()
 
 app = FastAPI()
 
@@ -72,6 +118,98 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def parse_interests(raw_value):
+    if not raw_value:
+        return []
+    if isinstance(raw_value, list):
+        return raw_value
+    try:
+        parsed = json.loads(raw_value)
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def serialize_interests(interests):
+    if not interests:
+        return None
+    return json.dumps(interests)
+
+
+def parse_genre_tags(raw_value, fallback_genre=None):
+    parsed = parse_interests(raw_value)
+    if parsed:
+        return parsed
+    if fallback_genre:
+        return [fallback_genre]
+    return []
+
+
+def normalize_genres(genres):
+    if not genres:
+        return []
+    normalized = []
+    seen = set()
+    for genre in genres:
+        value = (genre or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(value)
+    return normalized
+
+
+def serialize_genre_tags(genres):
+    normalized = normalize_genres(genres)
+    if not normalized:
+        return None
+    return json.dumps(normalized)
+
+
+def build_book_payload(
+    book: models.Book,
+    owner: models.User | None = None,
+    proximity: str | None = None,
+):
+    genre_tags = parse_genre_tags(getattr(book, "genre_tags", None), getattr(book, "genre", None))
+    payload = {
+        "id": book.id,
+        "title": book.title,
+        "author": book.author,
+        "review": book.review,
+        "rating": book.rating,
+        "status": book.status,
+        "genre": getattr(book, "genre", None) or (genre_tags[0] if genre_tags else None),
+        "genre_tags": genre_tags,
+        "image": book.image,
+        "availability": getattr(book, "availability", 1),
+        "owner_id": getattr(book, "owner_id", None),
+        "city": getattr(book, "city", None),
+        "area": getattr(book, "area", None),
+        "pickup_hint": getattr(book, "pickup_hint", None),
+    }
+    if proximity is not None:
+        payload["proximity"] = proximity
+    if owner:
+        payload["owner"] = {
+            "id": owner.id,
+            "name": owner.name if owner.name else owner.email,
+            "email": owner.email,
+            "avatar": owner.avatar,
+        }
+    else:
+        payload["owner"] = {
+            "id": None,
+            "name": None,
+            "email": None,
+            "avatar": None,
+        }
+    return payload
 
 
 # helper to get current user from Authorization header
@@ -138,11 +276,20 @@ def create_book(book: schemas.BookCreate, db: Session = Depends(get_db), current
     # attach current user as owner; ignore owner_id from client
     book_data = book.dict()
     book_data["owner_id"] = current_user.id
+    normalized_genres = normalize_genres(book_data.get("genre_tags"))
+    book_data["genre_tags"] = serialize_genre_tags(normalized_genres)
+    book_data["genre"] = normalized_genres[0] if normalized_genres else (book_data.get("genre") or None)
+    if not book_data.get("city"):
+        book_data["city"] = current_user.city
+    if not book_data.get("area"):
+        book_data["area"] = current_user.area
+    if not is_valid_city_area(book_data.get("city"), book_data.get("area")):
+        raise HTTPException(status_code=400, detail="Area must belong to the selected city")
     new_book = models.Book(**book_data)
     db.add(new_book)
     db.commit()
     db.refresh(new_book)
-    return new_book
+    return build_book_payload(new_book, current_user)
 
 
 # 📖 GET BOOKS
@@ -150,25 +297,7 @@ def create_book(book: schemas.BookCreate, db: Session = Depends(get_db), current
 def get_books(db: Session = Depends(get_db)):
     # return books with owner info so the frontend can show who posted each book
     rows = db.query(models.Book, models.User).outerjoin(models.User, models.Book.owner_id == models.User.id).all()
-    result = []
-    for book, user in rows:
-        result.append({
-            "id": book.id,
-            "title": book.title,
-            "author": book.author,
-            "review": book.review,
-            "rating": book.rating,
-            "status": book.status,
-            "image": book.image,
-            "availability": getattr(book, "availability", 1),
-            "owner_id": getattr(book, "owner_id", None),
-            "owner": {
-                "id": user.id if user else None,
-                "name": (user.name if user and user.name else (user.email if user else None)),
-                "avatar": user.avatar if user else None,
-            },
-        })
-    return result
+    return [build_book_payload(book, user) for book, user in rows]
 
 
 # ❌ DELETE BOOK
@@ -196,6 +325,14 @@ def update_book(book_id: int, update: schemas.BookUpdate, db: Session = Depends(
     
     # Update fields if provided
     update_data = update.dict(exclude_unset=True)
+    if "genre_tags" in update_data:
+        normalized_genres = normalize_genres(update_data.get("genre_tags"))
+        update_data["genre_tags"] = serialize_genre_tags(normalized_genres)
+        update_data["genre"] = normalized_genres[0] if normalized_genres else None
+    next_city = update_data.get("city", book.city)
+    next_area = update_data.get("area", book.area)
+    if not is_valid_city_area(next_city, next_area):
+        raise HTTPException(status_code=400, detail="Area must belong to the selected city")
     for field, value in update_data.items():
         if value is not None:
             setattr(book, field, value)
@@ -203,20 +340,31 @@ def update_book(book_id: int, update: schemas.BookUpdate, db: Session = Depends(
     db.add(book)
     db.commit()
     db.refresh(book)
-    return book
+    return build_book_payload(book, current_user)
 
 
 # USER PROFILE - current user
 @app.get("/users/me")
 def read_current_user(current_user: models.User = Depends(get_current_user)):
     # return basic user info for the logged-in user
-    return {"id": current_user.id, "email": current_user.email, "name": current_user.name, "bio": current_user.bio, "avatar": current_user.avatar}
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "bio": current_user.bio,
+        "avatar": current_user.avatar,
+        "interests": parse_interests(current_user.interests),
+        "city": current_user.city,
+        "area": current_user.area,
+    }
 
 
 @app.put("/users/me")
 def update_current_user(update: schemas.UserUpdate, current_user: models.User = Depends(get_current_user)):
     # Use the same SQLAlchemy session that loaded current_user to avoid
     # 'Object ... is already attached to session' errors when committing.
+    if not is_valid_city_area(update.city if update.city is not None else current_user.city, update.area if update.area is not None else current_user.area):
+        raise HTTPException(status_code=400, detail="Area must belong to the selected city")
     session = object_session(current_user)
     if session is None:
         # Fallback: open a fresh session and re-query the user (rare)
@@ -229,6 +377,12 @@ def update_current_user(update: schemas.UserUpdate, current_user: models.User = 
                 user.bio = update.bio
             if update.avatar is not None:
                 user.avatar = update.avatar
+            if update.interests is not None:
+                user.interests = serialize_interests(update.interests)
+            if update.city is not None:
+                user.city = update.city
+            if update.area is not None:
+                user.area = update.area
             db.add(user)
             db.commit()
         finally:
@@ -240,6 +394,12 @@ def update_current_user(update: schemas.UserUpdate, current_user: models.User = 
             current_user.bio = update.bio
         if update.avatar is not None:
             current_user.avatar = update.avatar
+        if update.interests is not None:
+            current_user.interests = serialize_interests(update.interests)
+        if update.city is not None:
+            current_user.city = update.city
+        if update.area is not None:
+            current_user.area = update.area
         session.add(current_user)
         session.commit()
     return {"message": "Profile updated"}
@@ -288,6 +448,7 @@ def search_books(query: str | None = None, db: Session = Depends(get_db)):
             "rating": book.rating,
             "status": book.status,
             "genre": getattr(book, "genre", None),
+            "genre_tags": parse_genre_tags(getattr(book, "genre_tags", None), getattr(book, "genre", None)),
             "image": book.image,
             "availability": getattr(book, "availability", 1),
             "owner_id": getattr(book, "owner_id", None),
@@ -314,6 +475,9 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
         "name": user.name,
         "bio": user.bio,
         "avatar": user.avatar,
+        "interests": parse_interests(user.interests),
+        "city": user.city,
+        "area": user.area,
     }
 
 # GET books for a user (PROTECTED - only authenticated users)
@@ -324,89 +488,283 @@ def read_user_books(user_id: int, db: Session = Depends(get_db), current_user: m
     return books
 
 
-# 📚 GET PERSONALIZED RECOMMENDATIONS
-@app.get("/books/recommendations")
-def get_recommendations(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """
-    Get personalized book recommendations for the current user.
-    
-    Scoring algorithm:
-    - Genre match: +15 points (highest priority)
-    - Author match: +12 points
-    - Rating ≥4.0: +1-2 points
-    - Recent (< 30 days): +1-3 points
-    
-    Returns top 20 books with score > 0, sorted by score (descending).
-    """
-    # Get all books
-    rows = db.query(models.Book, models.User).outerjoin(models.User, models.Book.owner_id == models.User.id).all()
-    
-    if not rows:
-        return []
-    
-    books_data = []
+# 📚 GET INTEREST-BASED PERSONALIZED BOOKS
+@app.get("/books/for-you")
+def get_for_you_books(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # normalize interests to trimmed lowercase strings to avoid mismatches
+    interests = {(interest or "").strip().lower() for interest in parse_interests(current_user.interests)}
+
+    rows = (
+        db.query(models.Book, models.User)
+        .outerjoin(models.User, models.Book.owner_id == models.User.id)
+        .filter(models.Book.owner_id != current_user.id)
+        .all()
+    )
+
+    ranked_books = []
     for book, owner in rows:
-        books_data.append({
-            "id": book.id,
-            "title": book.title,
-            "author": book.author,
-            "review": book.review,
-            "rating": book.rating,
-            "genre": book.status,  # Note: using 'status' field as genre (update schema if needed)
-            "status": book.status,
-            "image": book.image,
-            "availability": getattr(book, "availability", 1),
-            "owner_id": getattr(book, "owner_id", None),
-            "created_at": book.created_at if hasattr(book, "created_at") else None,
-            "owner": {
-                "id": owner.id if owner else None,
-                "name": (owner.name if owner and owner.name else (owner.email if owner else None)),
-                "avatar": owner.avatar if owner else None,
-            },
-        })
+        genre_tags = parse_genre_tags(getattr(book, "genre_tags", None), getattr(book, "genre", None))
+        # create normalized tag list for matching (trim + lower)
+        normalized_tags = [ (g or "").strip().lower() for g in genre_tags ]
+        matching_tags = [
+            genre for genre, n in zip(genre_tags, normalized_tags)
+            if n in interests
+        ]
+        same_city = bool(current_user.city and book.city == current_user.city)
+        same_area = bool(current_user.area and book.area == current_user.area and same_city)
+        is_nearby = same_city
+        if not interests and not is_nearby:
+            continue
+        if not matching_tags and not is_nearby:
+            continue
+
+        rank = 0
+        if is_nearby and matching_tags:
+            rank = 3
+        elif is_nearby:
+            rank = 2
+        elif matching_tags:
+            rank = 1
+
+        payload = build_book_payload(book, owner)
+        payload["matches_interests"] = bool(matching_tags)
+        payload["matching_genres"] = matching_tags
+        payload["nearby"] = same_area
+        payload["feed_reason"] = (
+            "Nearby and matches your interests"
+            if is_nearby and matching_tags
+            else "Nearby"
+            if is_nearby
+            else "Matches your interests"
+        )
+        area_rank = 0 if same_area else 1
+        city_rank = 0 if same_city else 1
+        ranked_books.append((rank, area_rank, city_rank, book.id, payload))
+
+    ranked_books.sort(key=lambda item: (-item[0], item[1], item[2], item[3]))
+    return [payload for _, __, ___, ____, payload in ranked_books]
+
+
+# 💬 CHAT ENDPOINTS
+
+# Get or create chat between two users
+@app.post("/chats/with/{other_user_id}")
+def get_or_create_chat(other_user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Get existing chat or create new one between current user and other_user_id"""
+    if current_user.id == other_user_id:
+        raise HTTPException(status_code=400, detail="Cannot chat with yourself")
     
-    # Simple scoring algorithm (client-side fallback in ForYou.jsx has more sophisticated version)
-    def score_book(book_dict):
-        score = 0
-        
-        # Genre/status match (simple check - can be enhanced with user preferences)
-        if book_dict.get("genre"):
-            score += 5  # Base score for any book
-        
-        # Rating boost
-        rating = book_dict.get("rating", 0)
-        if rating >= 4.5:
-            score += 3
-        elif rating >= 4.0:
-            score += 2
-        elif rating >= 3.5:
-            score += 1
-        
-        # Recency boost (if book was recently created)
-        if book_dict.get("created_at"):
-            import datetime
-            created = datetime.datetime.fromisoformat(book_dict["created_at"]) if isinstance(book_dict["created_at"], str) else book_dict["created_at"]
-            now = datetime.datetime.now()
-            days_old = (now - created).days
-            if days_old < 7:
-                score += 3
-            elif days_old < 30:
-                score += 1
-        
-        return score
+    # Check if other user exists
+    other_user = db.query(models.User).filter(models.User.id == other_user_id).first()
+    if not other_user:
+        raise HTTPException(status_code=404, detail="User not found")
     
-    # Score and filter books
-    scored_books = [
-        {**b, "_score": score_book(b)}
-        for b in books_data
+    # Find existing chat
+    chat = db.query(models.Chat).filter(
+        or_(
+            (models.Chat.user1_id == current_user.id) & (models.Chat.user2_id == other_user_id),
+            (models.Chat.user1_id == other_user_id) & (models.Chat.user2_id == current_user.id),
+        )
+    ).first()
+    
+    # Create new chat if doesn't exist
+    if not chat:
+        chat = models.Chat(user1_id=current_user.id, user2_id=other_user_id)
+        db.add(chat)
+        db.commit()
+        db.refresh(chat)
+    
+    return {"id": chat.id, "user1_id": chat.user1_id, "user2_id": chat.user2_id}
+
+
+# Get list of chats for current user
+@app.get("/chats")
+def get_chats(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Get all chats for current user with latest message and unread count"""
+    try:
+        chats = db.query(models.Chat).filter(
+            or_(
+                models.Chat.user1_id == current_user.id,
+                models.Chat.user2_id == current_user.id,
+            )
+        ).all()
+        
+        print(f"[DEBUG] User {current_user.id} has {len(chats)} chats")
+        
+        result = []
+        for chat in chats:
+            try:
+                # Determine other user
+                other_user_id = chat.user2_id if chat.user1_id == current_user.id else chat.user1_id
+                other_user = db.query(models.User).filter(models.User.id == other_user_id).first()
+                
+                # Skip if other user doesn't exist (deleted account)
+                if not other_user:
+                    print(f"[DEBUG] Chat {chat.id}: Other user {other_user_id} not found, skipping")
+                    continue
+                
+                # Get latest message
+                latest_msg = db.query(models.Message).filter(
+                    models.Message.chat_id == chat.id
+                ).order_by(models.Message.created_at.desc()).first()
+                
+                # Get unread count
+                unread_count = db.query(models.Message).filter(
+                    models.Message.chat_id == chat.id,
+                    models.Message.sender_id != current_user.id,
+                    models.Message.read == False
+                ).count()
+                
+                result.append({
+                    "id": chat.id,
+                    "user1_id": chat.user1_id,
+                    "user2_id": chat.user2_id,
+                    "created_at": chat.created_at,
+                    "other_user": {
+                        "id": other_user.id,
+                        "email": other_user.email,
+                        "name": other_user.name,
+                        "avatar": other_user.avatar,
+                    },
+                    "last_message": {
+                        "id": latest_msg.id,
+                        "content": latest_msg.content,
+                        "created_at": latest_msg.created_at,
+                        "sender_id": latest_msg.sender_id,
+                    } if latest_msg else None,
+                    "unread_count": unread_count,
+                })
+            except Exception as e:
+                print(f"[DEBUG] Error processing chat {chat.id}: {str(e)}")
+                continue
+        
+        # Sort by latest message (most recent first)
+        result.sort(key=lambda x: x["last_message"]["created_at"] if x["last_message"] else x["created_at"], reverse=True)
+        
+        print(f"[DEBUG] Returning {len(result)} chats to user {current_user.id}")
+        return result
+    except Exception as e:
+        print(f"[DEBUG] Error in get_chats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching chats: {str(e)}")
+
+
+# Get messages in a chat
+@app.get("/chats/{chat_id}/messages")
+def get_messages(chat_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Get all messages in a chat (user must be participant)"""
+    chat = db.query(models.Chat).filter(models.Chat.id == chat_id).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Check if user is participant
+    if chat.user1_id != current_user.id and chat.user2_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not a participant in this chat")
+    
+    messages = db.query(models.Message).filter(
+        models.Message.chat_id == chat_id
+    ).order_by(models.Message.created_at.asc()).all()
+    
+    # Mark messages as read (if receiver)
+    for msg in messages:
+        if msg.sender_id != current_user.id and not msg.read:
+            msg.read = True
+    db.commit()
+    
+    return [
+        {
+            "id": msg.id,
+            "chat_id": msg.chat_id,
+            "sender_id": msg.sender_id,
+            "content": msg.content,
+            "created_at": msg.created_at,
+            "read": msg.read,
+        }
+        for msg in messages
     ]
+
+
+# Send a message
+@app.post("/chats/{chat_id}/messages")
+def send_message(chat_id: int, msg_create: schemas.MessageCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Send a message in a chat (user must be participant)"""
+    chat = db.query(models.Chat).filter(models.Chat.id == chat_id).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
     
-    # Filter and sort
-    recommended = [b for b in scored_books if b["_score"] > 0]
-    recommended.sort(key=lambda x: x["_score"], reverse=True)
+    # Check if user is participant
+    if chat.user1_id != current_user.id and chat.user2_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not a participant in this chat")
     
-    # Remove score before returning
-    for book in recommended:
-        del book["_score"]
+    new_msg = models.Message(
+        chat_id=chat_id,
+        sender_id=current_user.id,
+        content=msg_create.content,
+    )
+    db.add(new_msg)
+    db.commit()
+    db.refresh(new_msg)
     
-    return recommended[:20]  # Return top 20
+    return {
+        "id": new_msg.id,
+        "chat_id": new_msg.chat_id,
+        "sender_id": new_msg.sender_id,
+        "content": new_msg.content,
+        "created_at": new_msg.created_at,
+        "read": new_msg.read,
+    }
+
+
+@app.get("/locations/options")
+def get_location_options():
+    return CITY_AREA_MAP
+
+
+# Get nearby books (area-level location matching, no precise coordinates)
+@app.get("/books/nearby")
+def get_nearby_books(
+    area: str | None = Query(None),
+    city: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Get books near the current user based on area-level matching.
+    
+    Privacy-first approach:
+    - Only uses city + area (no GPS coordinates or precise distances)
+    - Prioritizes books in user's area, then same city
+    - Returns books that are available for sharing
+    - Excludes user's own books
+    """
+    requested_city = (city or current_user.city or "").strip()
+    requested_area = (area or current_user.area or "").strip()
+    normalized_city = requested_city.lower()
+    normalized_area = requested_area.lower()
+
+    if not requested_city:
+        return []
+
+    rows = (
+        db.query(models.Book, models.User)
+        .join(models.User, models.Book.owner_id == models.User.id)
+        .filter(
+            func.lower(func.trim(models.Book.city)) == normalized_city,
+            models.Book.availability == True,
+        )
+        .all()
+    )
+
+    ranked_books = []
+    for book, owner in rows:
+        book_area = (book.area or "").strip().lower()
+        exact_area = bool(normalized_area and book_area == normalized_area)
+
+        if normalized_area and not exact_area:
+            continue
+
+        proximity = "nearby" if exact_area else "city"
+        rank = 0 if exact_area else 1
+        ranked_books.append((rank, book.id, build_book_payload(book, owner, proximity)))
+
+    ranked_books.sort(key=lambda item: (item[0], item[1]))
+    return [payload for _, __, payload in ranked_books]

@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "../context/AuthContext"
-import { BookMarked } from "lucide-react"
+import { BookMarked, MessageCircle, MapPin } from "lucide-react"
 
 export default function Navbar({ onAuthRequired }) {
   const { user, logout } = useAuth()
@@ -12,7 +12,7 @@ export default function Navbar({ onAuthRequired }) {
   }
 
   return (
-    <header className="w-full bg-white border-b border-gray-200">
+    <header className="w-full bg-white border-b border-gray-200 sticky top-0 z-40">
       <div className="max-w-6xl mx-auto flex items-center justify-between py-4 px-4">
         <Link to="/" className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-600 to-pink-500 flex items-center justify-center text-white shadow">
@@ -26,8 +26,16 @@ export default function Navbar({ onAuthRequired }) {
           {user && (
             <>
               <Link to="/feed" className="text-gray-700 hover:text-gray-900 font-medium">Explore</Link>
+              <Link to="/books/nearby" className="text-gray-700 hover:text-gray-900 font-medium flex items-center gap-1">
+                <MapPin size={18} />
+                Nearby
+              </Link>
               <Link to="/for-you" className="text-gray-700 hover:text-gray-900 font-medium">For You</Link>
               <Link to={`/profile/${user.id}`} className="text-gray-700 hover:text-gray-900 font-medium">My Profile</Link>
+              <Link to="/chats" className="text-gray-700 hover:text-gray-900 font-medium flex items-center gap-1">
+                <MessageCircle size={18} />
+                Messages
+              </Link>
             </>
           )}
         </nav>

@@ -1,8 +1,18 @@
 import { motion } from "framer-motion"
 import StarRating from "./StarRating.jsx"
 
-export function BookCard({ book, onOpen, onClick, owner }) {
+export function BookCard({ book, onOpen, onClick, owner, currentUser }) {
   const handleClick = onOpen || onClick
+  const genreTags = Array.isArray(book.genre_tags) && book.genre_tags.length > 0
+    ? book.genre_tags
+    : book.genre
+    ? [book.genre]
+    : []
+  const isNearby =
+    Boolean(currentUser?.city) &&
+    Boolean(currentUser?.area) &&
+    book.city === currentUser.city &&
+    book.area === currentUser.area
   
   const statusColors = {
     "Reading": "bg-blue-100 text-blue-800",
@@ -19,7 +29,7 @@ export function BookCard({ book, onOpen, onClick, owner }) {
       onClick={handleClick}
       className="cursor-pointer group"
     >
-      <div className="bg-white rounded-2xl overflow-hidden shadow-md hover:shadow-lg transition relative">
+      <div className={`bg-white rounded-2xl overflow-hidden shadow-md hover:shadow-lg transition relative ${isNearby ? "ring-2 ring-green-500/70" : ""}`}>
 
         <div className="aspect-[3/4] overflow-hidden bg-gray-100 relative">
           {book.image ? (
@@ -37,6 +47,12 @@ export function BookCard({ book, onOpen, onClick, owner }) {
           {book.status && (
             <div className={`absolute top-2 left-2 px-2 py-1 rounded-full text-xs font-semibold ${statusColors[book.status] || 'bg-gray-100 text-gray-800'}`}>
               {book.status}
+            </div>
+          )}
+
+          {isNearby && (
+            <div className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+              Nearby
             </div>
           )}
           
@@ -58,16 +74,34 @@ export function BookCard({ book, onOpen, onClick, owner }) {
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Author</p>
               <p className="text-sm text-gray-700 font-medium">{book.author}</p>
             </div>
-            {book.genre && (
+            {genreTags.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Genre</p>
-                <p className="text-sm text-gray-700">{book.genre}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Genres</p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {genreTags.slice(0, 3).map((genre) => (
+                    <span key={genre} className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">
+                      {genre}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
             {book.status && (
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</p>
                 <p className="text-sm text-gray-700">{book.status}</p>
+              </div>
+            )}
+            {book.city && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</p>
+                <p className="text-sm text-gray-700">📍 {book.area || "Area not set"}, {book.city}</p>
+              </div>
+            )}
+            {book.pickup_hint && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pickup Hint</p>
+                <p className="text-sm text-gray-700">{book.pickup_hint}</p>
               </div>
             )}
           </div>
