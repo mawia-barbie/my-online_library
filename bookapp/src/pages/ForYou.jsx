@@ -15,10 +15,12 @@ function ForYouInner() {
   const [showNearbyOnly, setShowNearbyOnly] = useState(false)
 
   useEffect(() => {
-    setLoading(true)
-    const token = localStorage.getItem('token')
+    if (!user) return  // ✅ prevent unnecessary calls
 
-    fetch("http://127.0.0.1:8000/books/for-you", {
+    setLoading(true)
+    const token = localStorage.getItem("token")
+
+    fetch("http://localhost:8000/books/for-you", {  // ✅ FIXED URL
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((res) => {
@@ -36,21 +38,21 @@ function ForYouInner() {
   }, [user])
 
   const updateBook = (updatedBook) => {
-    // Update the book in the list
     setBooks((prev) =>
       prev.map((b) =>
-        b.id === updatedBook.id
-          ? { ...b, ...updatedBook }
-          : b
+        b.id === updatedBook.id ? { ...b, ...updatedBook } : b
       )
     )
-    // Update selected book display
-    if (selectedBook && selectedBook.id === updatedBook.id) {
-      setSelectedBook({ ...selectedBook, ...updatedBook })
+
+    if (selectedBook?.id === updatedBook.id) {
+      setSelectedBook((prev) => ({ ...prev, ...updatedBook }))
     }
   }
 
-  const visibleBooks = showNearbyOnly ? books.filter((book) => book.feed_reason?.includes("Nearby")) : books
+  // ✅ SAFER FILTER (avoid undefined crash)
+  const visibleBooks = showNearbyOnly
+    ? books.filter((book) => book.nearby === true)
+    : books
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -63,6 +65,7 @@ function ForYouInner() {
             <h1 className="text-3xl font-bold text-gray-900">For You</h1>
           </div>
           <p className="text-gray-600">Books tailored to your interests</p>
+
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -75,6 +78,7 @@ function ForYouInner() {
             >
               Explore all genres
             </button>
+
             <button
               type="button"
               onClick={() => setShowNearbyOnly(true)}
@@ -86,7 +90,11 @@ function ForYouInner() {
             >
               Nearby first
             </button>
-            <Link to="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+
+            <Link
+              to="/"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+            >
               Explore all books
             </Link>
           </div>
@@ -100,33 +108,44 @@ function ForYouInner() {
           <div className="text-center py-12">
             <div className="text-gray-400 text-5xl mb-4">📚</div>
             <p className="text-gray-600">No books match this view yet.</p>
-            <p className="text-sm text-gray-500 mt-2">Try adding more genres in your profile or switch back to Explore all genres.</p>
+            <p className="text-sm text-gray-500 mt-2">
+              Try adding more genres in your profile or switch back to Explore all genres.
+            </p>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {visibleBooks.map((book) => (
-                <div key={book.id} className="relative group">
-                  <BookCard
-                    book={book}
-                    onOpen={() => setSelectedBook(book)}
-                    owner={book.owner}
-                    currentUser={user}
-                  />
-                  {book.matches_interests && (
-                    <div className="absolute top-2 right-2 bg-emerald-500 text-white px-2 py-1 rounded-full text-xs font-semibold">
-                      Matches your interests
-                    </div>
-                  )}
-                  {book.feed_reason && (
-                    <div className="mt-2 text-xs font-medium text-gray-500">
-                      {book.feed_reason}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {visibleBooks.map((book) => (
+              <div key={book.id} className="relative group">
+                <BookCard
+                  book={book}
+                  onOpen={() => setSelectedBook(book)}
+                  owner={book.owner}
+                  currentUser={user}
+                />
+
+                {/* ✅ Interest badge */}
+                {book.matches_interests && (
+                  <div className="absolute top-2 right-2 bg-emerald-500 text-white px-2 py-1 rounded-full text-xs font-semibold">
+                    Matches your interests
+                  </div>
+                )}
+
+                {/* ✅ Feed reasoning */}
+                {book.feed_reason && (
+                  <div className="mt-2 text-xs font-medium text-gray-500">
+                    {book.feed_reason}
+                  </div>
+                )}
+
+                {/* 🔥 NEW: explain genres */}
+                {book.matching_genres?.length > 0 && (
+                  <div className="text-xs text-indigo-500 mt-1">
+                    Because you like: {book.matching_genres.join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </main>
 
