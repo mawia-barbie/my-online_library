@@ -1,166 +1,117 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
+import StarRating from "./StarRating.jsx"
+import { Plus, ImagePlus, X } from "lucide-react"
 
-export default function AddBookDialog({ onClose, onSave }) {
+export function AddBookDialog({ onAdd }) {
+  const [open, setOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [author, setAuthor] = useState("")
-  const [review, setReview] = useState("")
   const [rating, setRating] = useState(0)
-  const [status, setStatus] = useState("To Read")
-  const [image, setImage] = useState(null)
+  const [review, setReview] = useState("")
+  const [thoughts, setThoughts] = useState("")
+  const [coverImage, setCoverImage] = useState("")
+  const fileInputRef = useRef(null)
 
-  // 📸 handle image upload
-  const handleImage = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      setImage(reader.result)
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => setCoverImage(reader.result)
+      reader.readAsDataURL(file)
     }
-    reader.readAsDataURL(file)
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
 
-    console.log("🔥 SUBMIT FIRED") // DEBUG
+    if (!title || !author || !coverImage) return
 
-    if (!title.trim() || !author.trim()) return
+    try {
+      const res = await fetch("http://127.0.0.1:8000/books", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          author,
+          rating,
+          review,
+          thoughts,
+          coverImage,
+        }),
+      })
 
-    const newBook = {
-      id: Date.now(),
-      title,
-      author,
-      review,
-      rating,
-      status,
-      image,
+      const data = await res.json()
+      onAdd(data)
+
+      reset()
+      setOpen(false)
+    } catch (err) {
+      console.error("Failed to add book", err)
     }
+  }
 
-    console.log("📚 NEW BOOK:", newBook)
-
-    onSave(newBook)
-
-    // reset
+  const reset = () => {
     setTitle("")
     setAuthor("")
-    setReview("")
     setRating(0)
-    setStatus("To Read")
-    setImage(null)
-
-    onClose()
+    setReview("")
+    setThoughts("")
+    setCoverImage("")
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
+    <div className="inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-full gap-2 px-6 py-2 bg-black text-white flex items-center"
       >
+        <Plus size={18} />
+        Add Book
+      </button>
 
-        {/* TITLE */}
-        <h2 className="text-xl font-semibold mb-4">
-          ➕ Add New Book
-        </h2>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setOpen(false); reset(); }} />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="relative bg-white rounded-2xl w-full max-w-lg mx-4 p-6 shadow-lg max-h-[90vh] overflow-y-auto">
+            <button onClick={() => { setOpen(false); reset(); }} className="absolute right-4 top-4 text-gray-500 hover:text-gray-700"><X size={16} /></button>
+            <h3 className="text-xl font-semibold mb-3">Add a New Book</h3>
 
-          {/* IMAGE */}
-          <div>
-            <label className="text-sm text-gray-600">Book Cover</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImage}
-              className="w-full mt-1"
-            />
+            <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="cursor-pointer mx-auto w-40 aspect-[3/4] rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-2 overflow-hidden hover:border-gray-300 transition"
+              >
+                {coverImage ? (
+                  <img src={coverImage} alt="cover" className="w-full h-full object-cover" />
+                ) : (
+                  <>
+                    <ImagePlus size={28} />
+                    <span className="text-sm text-gray-500">Upload cover</span>
+                  </>
+                )}
+              </div>
 
-            {image && (
-              <img
-                src={image}
-                className="h-40 w-full object-contain rounded-xl mt-2 bg-white p-2"
-                alt="preview"
-              />
-            )}
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-full border p-2 rounded" />
+              <input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Author" className="w-full border p-2 rounded" />
+
+              <StarRating rating={rating} onRate={setRating} />
+
+              <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="Review" className="w-full border p-2 rounded" />
+              <textarea value={thoughts} onChange={(e) => setThoughts(e.target.value)} placeholder="Thoughts" className="w-full border p-2 rounded" />
+
+              <button type="submit" disabled={!title || !author || !coverImage} className="w-full bg-black text-white py-2 rounded">
+                Add Book
+              </button>
+            </form>
           </div>
-
-          {/* TITLE */}
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Book title"
-            className="w-full border p-2 rounded-lg"
-          />
-
-          {/* AUTHOR */}
-          <input
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder="Author"
-            className="w-full border p-2 rounded-lg"
-          />
-
-          {/* REVIEW */}
-          <textarea
-            value={review}
-            onChange={(e) => setReview(e.target.value)}
-            placeholder="Your thoughts..."
-            className="w-full border p-2 rounded-lg h-24"
-          />
-
-          {/* ⭐ RATING */}
-          <div>
-            <p className="text-sm text-gray-600 mb-1">Rating</p>
-            <div className="flex gap-1 text-2xl cursor-pointer">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <span
-                  key={star}
-                  onClick={() => setRating(star)}
-                  className={star <= rating ? "text-yellow-400" : "text-gray-300"}
-                >
-                  ★
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* STATUS */}
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="w-full border p-2 rounded-lg"
-          >
-            <option>To Read</option>
-            <option>Reading</option>
-            <option>Done</option>
-          </select>
-
-          {/* ACTIONS */}
-          <div className="flex justify-between pt-2">
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-gray-500"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="submit"
-              className="bg-black text-white px-4 py-2 rounded-lg"
-            >
-              Save Book
-            </button>
-
-          </div>
-
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
