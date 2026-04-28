@@ -106,10 +106,11 @@ app = FastAPI()
 # important: ensure CORS middleware is added before routes are used
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173",
+                   "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*", "Authorization"],
+    allow_headers=["*"],
 )
 
 def get_db():
@@ -230,6 +231,51 @@ def get_current_user(authorization: str | None = Header(None), db: Session = Dep
         return user
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+def update_user_preference(db, user_id: int, book_id: int, interaction_type: str):
+    # map interaction strength
+    weights = {
+        "view": 0.1,
+        "click": 0.3,
+        "like": 1.5,
+        "save": 2.0
+    }
+
+    increment = weights.get(interaction_type, 0.0)
+
+    if increment == 0:
+        return
+
+    # get book → extract genre
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    if not book:
+        return
+
+    genre_id = book.genre_id
+
+    # find existing preference
+    pref = db.query(models.UserPreference).filter_by(
+        user_id=user_id,
+        genre_id=genre_id
+    ).first()
+
+    # create if not exists
+    if not pref:
+        pref = models.UserPreference(
+            user_id=user_id,
+            genre_id=genre_id,
+            weight=0.0
+        )
+        db.add(pref)
+
+    # update weight
+    pref.weight += increment
+
+    db.commit()
+
+# 👇 ADD IT HERE
+def get_user_genre_weights(db, user_id: int):
+    prefs = db.query(models.UserPreference).filter_by(user_id=user_id).all()
+    return {p.genre_id: p.weight for p in prefs}
 
 
 # REGISTER
@@ -254,6 +300,9 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
 
+    print("LOGIN EMAIL:", user.email)
+    print("DB USER:", db_user)
+ 
     if not db_user or not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -272,25 +321,44 @@ def get_db():
 
 # ➕ CREATE BOOK
 @app.post("/books")
-def create_book(book: schemas.BookCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    # attach current user as owner; ignore owner_id from client
+def create_book(
+    book: schemas.BookCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
     book_data = book.dict()
+
+    # attach owner
     book_data["owner_id"] = current_user.id
+
+    # normalize genres
     normalized_genres = normalize_genres(book_data.get("genre_tags"))
     book_data["genre_tags"] = serialize_genre_tags(normalized_genres)
-    book_data["genre"] = normalized_genres[0] if normalized_genres else (book_data.get("genre") or None)
+    print("NORMALIZED GENRES:", normalized_genres)  # DEBUG
+
+    # ⚠️ REMOVE THIS LINE (IMPORTANT)
+    book_data.pop("genre", None)
+
+    # safer: only use genre_id OR ignore genre relationship entirely
+    book_data["genre"] = None  # OR just delete if not needed
+
     if not book_data.get("city"):
         book_data["city"] = current_user.city
+
     if not book_data.get("area"):
         book_data["area"] = current_user.area
+
     if not is_valid_city_area(book_data.get("city"), book_data.get("area")):
         raise HTTPException(status_code=400, detail="Area must belong to the selected city")
-    new_book = models.Book(**book_data)
+
+    new_book = models.Book(**book_data)   # now SAFE
+    print("NEW BOOK DATA:", book_data)  # DEBUG
     db.add(new_book)
     db.commit()
     db.refresh(new_book)
-    return build_book_payload(new_book, current_user)
 
+    return build_book_payload(new_book, current_user)
 
 # 📖 GET BOOKS
 @app.get("/books")
@@ -549,33 +617,40 @@ def get_for_you_books(db: Session = Depends(get_db), current_user: models.User =
 
 # Get or create chat between two users
 @app.post("/chats/with/{other_user_id}")
-def get_or_create_chat(other_user_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """Get existing chat or create new one between current user and other_user_id"""
+def get_or_create_chat(
+    other_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     if current_user.id == other_user_id:
         raise HTTPException(status_code=400, detail="Cannot chat with yourself")
-    
-    # Check if other user exists
+
     other_user = db.query(models.User).filter(models.User.id == other_user_id).first()
     if not other_user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # Find existing chat
+
+    # 🔥 NORMALIZE ORDER (KEY FIX)
+    user1_id = min(current_user.id, other_user_id)
+    user2_id = max(current_user.id, other_user_id)
+
+    # 🔍 single clean query
     chat = db.query(models.Chat).filter(
-        or_(
-            (models.Chat.user1_id == current_user.id) & (models.Chat.user2_id == other_user_id),
-            (models.Chat.user1_id == other_user_id) & (models.Chat.user2_id == current_user.id),
-        )
+        models.Chat.user1_id == user1_id,
+        models.Chat.user2_id == user2_id
     ).first()
-    
-    # Create new chat if doesn't exist
+
+    # 🆕 create if not exists
     if not chat:
-        chat = models.Chat(user1_id=current_user.id, user2_id=other_user_id)
+        chat = models.Chat(user1_id=user1_id, user2_id=user2_id)
         db.add(chat)
         db.commit()
         db.refresh(chat)
-    
-    return {"id": chat.id, "user1_id": chat.user1_id, "user2_id": chat.user2_id}
 
+    return {
+        "id": chat.id,
+        "user1_id": chat.user1_id,
+        "user2_id": chat.user2_id
+    }
 
 # Get list of chats for current user
 @app.get("/chats")
@@ -768,3 +843,51 @@ def get_nearby_books(
 
     ranked_books.sort(key=lambda item: (item[0], item[1]))
     return [payload for _, __, payload in ranked_books]
+@app.post("/interactions")
+def create_interaction(
+    book_id: int,
+    type: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    interaction = models.Interaction(
+        user_id=current_user.id,
+        book_id=book_id,
+        type=type,
+        weight={
+            "view": 0.1,
+            "click": 0.3,
+            "like": 1.5,
+            "save": 2.0
+        }.get(type, 0.0)
+    )
+
+    db.add(interaction)
+    db.commit()
+
+    # 🔥 IMPORTANT: update preference immediately
+    update_user_preference(
+        db,
+        current_user.id,
+        book_id,
+        type
+    )
+
+    return {"message": "interaction saved"}
+
+@app.get("/users/me/preferences")
+def get_my_preferences(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    prefs = db.query(models.UserPreference).filter(
+        models.UserPreference.user_id == current_user.id
+    ).all()
+
+    return [
+        {
+            "genre_id": p.genre_id,
+            "weight": p.weight
+        }
+        for p in prefs
+    ]

@@ -32,7 +32,6 @@ function FeedInner() {
     rating: 0,
     review: "",
     status: "",
-    genre: "",
     genre_tags: [],
     image: "",
     pickup_hint: "",
@@ -476,7 +475,7 @@ function FeedInner() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {GENRE_OPTIONS.map((genre) => {
-                    const active = formData.genre_tags.includes(genre)
+                    const active = (formData.genre_tags || []).includes(genre)
                     return (
                       <button
                         key={genre}
