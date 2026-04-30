@@ -103,6 +103,16 @@ class Book(Base):
     owner_id = Column(Integer, ForeignKey("users.id"))
     genre_id = Column(Integer, ForeignKey("genres.id"))
 
+    # New fields (nullable to remain backward-compatible)
+    availability = Column(Integer, default=1)
+    genre_tags = Column(Text, nullable=True)  # serialized JSON or comma list
+    city = Column(String, nullable=True)
+    area = Column(String, nullable=True)
+    pickup_hint = Column(String, nullable=True)
+    location_display_name = Column(String, nullable=True)
+    location_latitude = Column(Float, nullable=True)
+    location_longitude = Column(Float, nullable=True)
+
     owner = relationship("User", back_populates="books")
     genre = relationship("Genre", back_populates="books")
     interactions = relationship("Interaction", back_populates="book")

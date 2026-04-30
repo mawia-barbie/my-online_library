@@ -13,3 +13,5 @@ __pycache__/
 
 # misc
 .vscode
+
+venv

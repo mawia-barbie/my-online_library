@@ -17,8 +17,8 @@ Base.metadata.create_all(bind=engine)
 # If the project already has an existing SQLite file, SQLAlchemy's create_all
 # won't add new columns. This helper checks the books table and runs simple
 # ALTER TABLE ADD COLUMN statements for the new fields we added (owner_id,
-# availability). This is intended for development only; use proper migrations
-# (Alembic) in production.
+# availability, genre_id). This is intended for development only; use proper
+# migrations (Alembic) in production.
 def ensure_books_columns():
     with engine.connect() as conn:
         try:
@@ -49,6 +49,21 @@ def ensure_books_columns():
             conn.execute(text("ALTER TABLE books ADD COLUMN location_latitude REAL"))
         if 'location_longitude' not in cols:
             conn.execute(text("ALTER TABLE books ADD COLUMN location_longitude REAL"))
+        # add genre_id column used by models if missing (safe development migration)
+        if 'genre_id' not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN genre_id INTEGER"))
+
+        # Ensure genres table exists (create simple table if missing) - dev helper only
+        try:
+            res = conn.execute(text("PRAGMA table_info(genres)"))
+            gcols = [row[1] for row in res.fetchall()]
+            if not gcols:
+                conn.execute(text(
+                    "CREATE TABLE IF NOT EXISTS genres (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)"
+                ))
+        except Exception:
+            # ignore - best effort
+            pass
 
 ensure_books_columns()
 
@@ -106,11 +121,10 @@ app = FastAPI()
 # important: ensure CORS middleware is added before routes are used
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173",
-                   "http://127.0.0.1:5173"],
+    allow_origins=["*"],  # development: allow all origins to avoid CORS issues
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"],
 )
 
 def get_db():
